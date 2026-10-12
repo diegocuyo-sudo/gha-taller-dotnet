@@ -1,7 +1,6 @@
 name: 01 · Hola .NET
 
-on:
-  push:
+on:  
   workflow_dispatch:
 
 jobs:
