@@ -1,0 +1,65 @@
+name: Deploy → Render
+
+on:
+  workflow_call:
+    inputs:
+      image-digest:
+        description: "Digest de la imagen en GHCR (sha256:...)"
+        required: true
+        type: string
+      expected-version:
+        description: "Versión que debe responder /api/version"
+        required: true
+        type: string
+      environment:
+        description: "Environment de GitHub (dev o production)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ vars.RENDER_URL }}
+    steps:
+      - name: Disparar el deploy en Render
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          OWNER: ${{ github.repository_owner }}
+          DIGEST: ${{ inputs.image-digest }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::error::Falta el secreto RENDER_DEPLOY_HOOK_URL"
+            exit 1
+          fi
+          IMG="ghcr.io/${OWNER,,}/gha-taller-dotnet@${DIGEST}"
+          echo "Desplegando $IMG"
+          ENC=$(jq -rn --arg v "$IMG" '$v|@uri')
+          curl -fsS -X POST "${HOOK}&imgURL=${ENC}"
+
+      - name: Esperar a que responda la nueva versión
+        env:
+          URL: ${{ vars.RENDER_URL }}
+          VERSION: ${{ inputs.expected-version }}
+        run: |
+          for i in $(seq 1 40); do
+            BODY=$(curl -fsS --max-time 30 "$URL/api/version" || true)
+            echo "Intento $i: ${BODY:-sin respuesta}"
+            if echo "$BODY" | jq -e --arg v "$VERSION" --arg c "$GITHUB_SHA" \
+                 '.version == $v and .commit == $c' > /dev/null 2>&1; then
+              {
+                echo "### Desplegado en Render"
+                echo "- URL: $URL"
+                echo "- Versión: \`$VERSION\` · commit \`${GITHUB_SHA::7}\`"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Render no sirvió la versión $VERSION en 10 minutos"
+          exit 1

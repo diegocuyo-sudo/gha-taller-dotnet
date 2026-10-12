@@ -75,3 +75,13 @@ jobs:
             APP_VERSION=main
             GIT_SHA=${{ github.sha }}
           cache-from: type=gha
+
+  deploy:
+    needs: build-push
+    if: vars.RENDER_URL != ''          # se salta si no existe la variable
+    uses: ./.github/workflows/deploy-render.yml
+    with:
+      image-digest: ${{ needs.build-push.outputs.digest }}
+      expected-version: main
+      environment: dev
+    secrets: inherit
