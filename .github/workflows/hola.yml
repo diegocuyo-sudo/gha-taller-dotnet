@@ -1,0 +1,26 @@
+name: 01 · Hola .NET
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  saludar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Saludo
+        run: echo "Hola. Este job corre en $RUNNER_OS."
+
+      - name: SDKs de .NET que trae la máquina
+        run: dotnet --list-sdks
+
+      - name: Descargar el código
+        uses: actions/checkout@v7
+
+      - name: Ver archivos del repo
+        run: ls -la
+
+      - name: Escribir un resumen del run
+        run: |
+          echo "### Hola desde GitHub Actions" >> "$GITHUB_STEP_SUMMARY"
+          echo "SDK de .NET por defecto: \`$(dotnet --version)\`" >> "$GITHUB_STEP_SUMMARY"
