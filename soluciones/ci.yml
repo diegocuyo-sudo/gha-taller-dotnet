@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:        # permite reutilizarlo desde release.yml (Paso 5)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  formato:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - run: dotnet restore
+      - name: Verificar formato del código
+        run: dotnet format --verify-no-changes --no-restore --severity error
+
+  test:
+    needs: formato
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    name: test (${{ matrix.os }})
+    permissions:
+      contents: read
+      actions: read
+      checks: write       # para publicar el reporte de tests
+    defaults:
+      run:
+        shell: bash       # mismos comandos en Linux y en Windows
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Caché de paquetes NuGet
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - run: dotnet restore
+      - run: dotnet build --no-restore -c Release
+
+      - name: Tests con cobertura
+        run: >
+          dotnet test --no-build -c Release
+          --logger trx --results-directory TestResults
+          --collect:"XPlat Code Coverage"
+
+      - name: Reporte de tests
+        if: always() && matrix.os == 'ubuntu-latest'
+        uses: dorny/test-reporter@v3
+        with:
+          name: Resultados de tests (.NET)
+          path: TestResults/*.trx
+          reporter: dotnet-trx
+
+      - name: Resumen de cobertura
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          dotnet tool install --global dotnet-reportgenerator-globaltool
+          reportgenerator -reports:"TestResults/**/coverage.cobertura.xml" \
+            -targetdir:coverage -reporttypes:"Html;MarkdownSummaryGithub"
+          cat coverage/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Subir reporte de cobertura
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
